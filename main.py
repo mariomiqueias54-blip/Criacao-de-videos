@@ -4,6 +4,8 @@ from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import edge_tts
+import asyncio
+from edge_tts.exceptions import NoAudioReceived
 from openai import AsyncOpenAI
 
 app = FastAPI(title="Arquivo Zero Studio")
@@ -193,7 +195,23 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
                 path=temp/f"photo{i}.jpg"; im.save(path);pics.append(path)
             except Exception:raise HTTPException(400,"Imagem inválida")
         audio=OUT/f"{job}.mp3"
-        await edge_tts.Communicate(script,voice,rate=voice_rate,pitch=voice_pitch).save(str(audio))
+        # O provedor de TTS pode recusar vozes ou retornar áudio vazio.
+        # Faz uma nova tentativa antes de retornar uma mensagem compreensível.
+        audio_ready = False
+        for attempt in range(2):
+            try:
+                await edge_tts.Communicate(script,voice,rate=voice_rate,pitch=voice_pitch).save(str(audio))
+                if audio.is_file() and audio.stat().st_size > 1024:
+                    audio_ready = True
+                    break
+            except NoAudioReceived:
+                logging.warning("TTS sem áudio para voz %s, tentativa %s", voice, attempt + 1)
+            except Exception:
+                logging.exception("Erro ao gerar narração, tentativa %s", attempt + 1)
+            if attempt == 0:
+                await asyncio.sleep(1)
+        if not audio_ready:
+            raise HTTPException(503, "O serviço de voz não enviou áudio. Experimente Antônio ou Francisca, no tom original, e tente novamente.")
         seconds=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(audio)]).strip())
         words=script.split()
         chunks=[" ".join(words[i:i+28]) for i in range(0,len(words),28)] or [script]
