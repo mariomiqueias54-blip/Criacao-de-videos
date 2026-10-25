@@ -148,10 +148,8 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
         # Limita buffers e paralelismo do FFmpeg em servidores de 512 MB.
         run(["ffmpeg","-y","-nostdin","-threads","1","-filter_threads","1","-filter_complex_threads","1","-f","concat","-safe","0","-i",str(concat),
              "-i",str(audio),"-map","0:v:0","-map","1:a:0",
-             "-vf",f"fps=8,scale={width}:{height}:flags=fast_bilinear,format=yuv420p",
-             "-c:v","libx264","-preset","ultrafast","-tune","zerolatency","-threads","1",
-             "-x264-params","ref=1:bframes=0:rc-lookahead=0:sync-lookahead=0:threads=1",
-             "-crf","32",
+             "-vf",f"fps=6,scale={width}:{height}:flags=fast_bilinear,format=yuv420p",
+             "-c:v","mpeg4","-threads","1","-q:v","7","-bf","0",
              "-c:a","aac","-b:a","96k","-shortest","-movflags","+faststart",str(video)])
         return {"video":f"/download/{job}.mp4","audio":f"/download/{job}.mp3","duration":round(seconds,1),"resolution":f"{width} x {height}"}
     except HTTPException:raise
