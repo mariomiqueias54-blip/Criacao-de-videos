@@ -130,7 +130,7 @@ def make_slide(path, title, text, image_path, width, height, visual_style="docum
     d.rectangle((0,0,width,12), fill=accent)
     large = ImageFont.truetype(FONT, int(width*.045))
     small = ImageFont.truetype(FONT, int(width*.029))
-    d.text((int(width*.06),int(height*.10)), "ARQUIVO ZERO  /  STUDIO", fill="#37d9a0",font=small)
+    d.text((int(width*.06),int(height*.10)), "ARQUIVO ZERO  /  STUDIO", fill=accent,font=small)
     def lines(s, f, max_width):
         out=[]; current=""
         for word in s.split():
@@ -144,8 +144,21 @@ def make_slide(path, title, text, image_path, width, height, visual_style="docum
         d.text((int(width*.06),y),line,font=large,fill="white");y+=int(width*.06)
     y=int(height*.77)
     for line in lines(text,small,int(width*.88))[:5]:
-        d.text((int(width*.06),y),line,font=small,fill="white");y+=int(width*.042)
+        d.text((int(width*.06),y),line,font=small,fill=accent if visual_style=="minimal" else "white");y+=int(width*.042)
     bg.save(path)
+
+@app.post("/api/voice-preview")
+async def voice_preview(voice: str = Form("pt-BR-AntonioNeural"), voice_rate: str = Form("+0%"), voice_pitch: str = Form("+0Hz")):
+    allowed = ("pt-BR-AntonioNeural","pt-BR-FranciscaNeural","pt-BR-BrendaNeural","pt-BR-DonatoNeural","pt-BR-GiovannaNeural","pt-BR-HumbertoNeural","pt-BR-JulioNeural","pt-BR-LeilaNeural","pt-BR-ManuelaNeural","pt-BR-NicolauNeural","pt-BR-ThalitaNeural","pt-BR-YaraNeural")
+    if voice not in allowed or voice_rate not in ("-15%","-8%","+0%","+8%","+15%") or voice_pitch not in ("-10Hz","-5Hz","+0Hz","+5Hz"):
+        raise HTTPException(400, "Configuração de voz inválida.")
+    filename = uuid.uuid4().hex + ".mp3"
+    try:
+        await edge_tts.Communicate("Bem-vindo ao Arquivo Zero Studio. Esta é uma demonstração da minha voz para seus próximos vídeos.",voice,rate=voice_rate,pitch=voice_pitch).save(str(OUT / filename))
+        return {"audio":"/download/"+filename}
+    except Exception as exc:
+        logging.exception("Falha na prévia da voz")
+        raise HTTPException(502, "Não foi possível gerar a prévia da voz.") from exc
 
 @app.post("/api/render")
 async def render(title: str=Form(...), script: str=Form(...), format: str=Form("vertical"), voice: str=Form("pt-BR-AntonioNeural"), images: list[UploadFile]=File(default=[]), visual_style: str=Form("documentary"), voice_rate: str=Form("+0%"), voice_pitch: str=Form("+0Hz")):
