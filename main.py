@@ -108,6 +108,8 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
     if format not in ("vertical","horizontal") or len(images)>15:
         raise HTTPException(400,"Formato ou quantidade de imagens inválidos")
     width,height=(1080,1920) if format=="vertical" else (1920,1080)
+    # Desenha as telas em meia resolucao para poupar RAM; exporta em Full HD.
+    slide_width,slide_height=width//2,height//2
     job=uuid.uuid4().hex
     temp=Path(tempfile.mkdtemp(prefix="az_"))
     try:
@@ -133,7 +135,7 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
         slides=[]
         for i,chunk in enumerate(chunks):
             slide=temp/f"slide{i}.jpg"
-            make_slide(slide,title,chunk,pics[i%len(pics)] if pics else None,width,height)
+            make_slide(slide,title,chunk,pics[i%len(pics)] if pics else None,slide_width,slide_height)
             slides.append(slide)
         concat=temp/"slides.txt"
         duration=max(0.5,seconds/len(slides))
@@ -143,10 +145,13 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
         entries.append(f"file '{slides[-1]}'")
         concat.write_text("\n".join(entries)+"\n",encoding="utf-8")
         video=OUT/f"{job}.mp4"
-        run(["ffmpeg","-y","-threads","1","-f","concat","-safe","0","-i",str(concat),
+        # Limita buffers e paralelismo do FFmpeg em servidores de 512 MB.
+        run(["ffmpeg","-y","-nostdin","-threads","1","-filter_threads","1","-filter_complex_threads","1","-f","concat","-safe","0","-i",str(concat),
              "-i",str(audio),"-map","0:v:0","-map","1:a:0",
-             "-vf",f"fps=12,scale={width}:{height}:flags=fast_bilinear,format=yuv420p",
-             "-c:v","libx264","-preset","ultrafast","-threads","1","-crf","30",
+             "-vf",f"fps=8,scale={width}:{height}:flags=fast_bilinear,format=yuv420p",
+             "-c:v","libx264","-preset","ultrafast","-tune","zerolatency","-threads","1",
+             "-x264-params","ref=1:bframes=0:rc-lookahead=0:sync-lookahead=0:threads=1",
+             "-crf","32",
              "-c:a","aac","-b:a","96k","-shortest","-movflags","+faststart",str(video)])
         return {"video":f"/download/{job}.mp4","audio":f"/download/{job}.mp3","duration":round(seconds,1),"resolution":f"{width} x {height}"}
     except HTTPException:raise
