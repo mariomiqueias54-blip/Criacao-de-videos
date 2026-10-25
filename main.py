@@ -1,4 +1,4 @@
-import os, json, uuid, tempfile, subprocess, shutil
+import os, json, uuid, tempfile, subprocess, shutil, logging
 from pathlib import Path
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
@@ -128,20 +128,31 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
         seconds=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(audio)]).strip())
         words=script.split()
         chunks=[" ".join(words[i:i+28]) for i in range(0,len(words),28)] or [script]
-        parts=[]
+        # Renderiza uma única vez, sem clips intermediários nem recodificação dupla.
+        # Limita threads para reduzir picos de memória em hospedagens pequenas.
+        slides=[]
         for i,chunk in enumerate(chunks):
             slide=temp/f"slide{i}.jpg"
             make_slide(slide,title,chunk,pics[i%len(pics)] if pics else None,width,height)
-            clip=temp/f"clip{i}.mp4"
-            run(["ffmpeg","-y","-loop","1","-framerate","25","-i",str(slide),"-t",str(max(.5,seconds/len(chunks))),"-vf",f"scale={width}:{height},format=yuv420p","-c:v","libx264","-preset","ultrafast","-r","25",str(clip)])
-            parts.append(clip)
-        concat=temp/"list.txt"
-        concat.write_text("".join("file '"+str(p)+"'\n" for p in parts))
+            slides.append(slide)
+        concat=temp/"slides.txt"
+        duration=max(0.5,seconds/len(slides))
+        entries=[]
+        for slide in slides:
+            entries.extend([f"file '{slide}'", f"duration {duration:.6f}"])
+        entries.append(f"file '{slides[-1]}'")
+        concat.write_text("\n".join(entries)+"\n",encoding="utf-8")
         video=OUT/f"{job}.mp4"
-        run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(concat),"-i",str(audio),"-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p","-c:a","aac","-shortest","-movflags","+faststart",str(video)])
+        run(["ffmpeg","-y","-threads","1","-f","concat","-safe","0","-i",str(concat),
+             "-i",str(audio),"-map","0:v:0","-map","1:a:0",
+             "-vf",f"fps=12,scale={width}:{height}:flags=fast_bilinear,format=yuv420p",
+             "-c:v","libx264","-preset","ultrafast","-threads","1","-crf","30",
+             "-c:a","aac","-b:a","96k","-shortest","-movflags","+faststart",str(video)])
         return {"video":f"/download/{job}.mp4","audio":f"/download/{job}.mp3","duration":round(seconds,1),"resolution":f"{width} x {height}"}
     except HTTPException:raise
-    except Exception:raise HTTPException(500,"Falha ao renderizar. Verifique recursos do servidor e serviço de voz.")
+    except Exception as exc:
+        logging.exception("Falha na renderizacao do video")
+        raise HTTPException(500, "Falha ao renderizar. Consulte os logs do Render para identificar a etapa.") from exc
     finally:shutil.rmtree(temp,ignore_errors=True)
 
 @app.get("/download/{filename}")
