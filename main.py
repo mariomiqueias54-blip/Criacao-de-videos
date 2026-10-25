@@ -115,13 +115,15 @@ def run(args):
         raise RuntimeError(p.stderr[-500:])
     return p.stdout
 
-def make_slide(path, title, text, image_path, width, height):
-    bg = Image.new("RGB", (width,height), "#081017")
+def make_slide(path, title, text, image_path, width, height, visual_style="documentary"):
+    palettes = {"documentary":("#081017","#37d9a0"),"minimal":("#14100f","#d3ae75"),"breaking":("#0c101b","#ff4c48"),"cinematic":("#090b12","#e2bc74"),"social":("#12111b","#c9a4ff")}
+    bg_color, accent = palettes.get(visual_style, palettes["documentary"])
+    bg = Image.new("RGB", (width,height), bg_color)
     if image_path:
         img = ImageOps.fit(Image.open(image_path).convert("RGB"), (width,height))
-        bg = Image.blend(img, bg, .48)
+        bg = Image.blend(img, bg, .68 if visual_style == "cinematic" else .48)
     d = ImageDraw.Draw(bg)
-    d.rectangle((0,0,width,12), fill="#37d9a0")
+    d.rectangle((0,0,width,12), fill=accent)
     large = ImageFont.truetype(FONT, int(width*.045))
     small = ImageFont.truetype(FONT, int(width*.029))
     d.text((int(width*.06),int(height*.10)), "ARQUIVO ZERO  /  STUDIO", fill="#37d9a0",font=small)
@@ -142,13 +144,17 @@ def make_slide(path, title, text, image_path, width, height):
     bg.save(path)
 
 @app.post("/api/render")
-async def render(title: str=Form(...), script: str=Form(...), format: str=Form("vertical"), voice: str=Form("pt-BR-AntonioNeural"), images: list[UploadFile]=File(default=[])):
+async def render(title: str=Form(...), script: str=Form(...), format: str=Form("vertical"), voice: str=Form("pt-BR-AntonioNeural"), images: list[UploadFile]=File(default=[]), visual_style: str=Form("documentary"), voice_rate: str=Form("+0%"), voice_pitch: str=Form("+0Hz")):
     if not title.strip() or not script.strip() or len(script)>5000:
         raise HTTPException(400, "Informe título e narração de até 5000 caracteres.")
     if voice not in ("pt-BR-AntonioNeural","pt-BR-FranciscaNeural","pt-BR-BrendaNeural","pt-BR-DonatoNeural","pt-BR-GiovannaNeural","pt-BR-HumbertoNeural","pt-BR-JulioNeural","pt-BR-LeilaNeural","pt-BR-ManuelaNeural","pt-BR-NicolauNeural","pt-BR-ThalitaNeural","pt-BR-YaraNeural"):
         raise HTTPException(400,"Voz inválida")
     if format not in ("vertical","horizontal","square","portrait") or len(images)>15:
         raise HTTPException(400,"Formato ou quantidade de imagens inválidos")
+    if visual_style not in ("documentary","minimal","breaking","cinematic","social"):
+        raise HTTPException(400,"Estilo visual inválido")
+    if voice_rate not in ("-15%","-8%","+0%","+8%","+15%") or voice_pitch not in ("-10Hz","-5Hz","+0Hz","+5Hz"):
+        raise HTTPException(400,"Ajuste de voz inválido")
     width,height={"vertical":(1080,1920),"horizontal":(1920,1080),"square":(1080,1080),"portrait":(1080,1350)}[format]
     # Desenha as telas em meia resolucao para poupar RAM; exporta em Full HD.
     slide_width,slide_height=width//2,height//2
@@ -168,7 +174,7 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
                 path=temp/f"photo{i}.jpg"; im.save(path);pics.append(path)
             except Exception:raise HTTPException(400,"Imagem inválida")
         audio=OUT/f"{job}.mp3"
-        await edge_tts.Communicate(script,voice).save(str(audio))
+        await edge_tts.Communicate(script,voice,rate=voice_rate,pitch=voice_pitch).save(str(audio))
         seconds=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(audio)]).strip())
         words=script.split()
         chunks=[" ".join(words[i:i+28]) for i in range(0,len(words),28)] or [script]
@@ -177,7 +183,7 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
         slides=[]
         for i,chunk in enumerate(chunks):
             slide=temp/f"slide{i}.jpg"
-            make_slide(slide,title,chunk,pics[i%len(pics)] if pics else None,slide_width,slide_height)
+            make_slide(slide,title,chunk,pics[i%len(pics)] if pics else None,slide_width,slide_height,visual_style)
             slides.append(slide)
         concat=temp/"slides.txt"
         duration=max(0.5,seconds/len(slides))
