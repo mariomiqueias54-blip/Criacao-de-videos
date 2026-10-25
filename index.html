@@ -45,7 +45,7 @@ async function renderVideo(){
   const player=document.getElementById('player');
   try{player.src=videoUrl;player.load()}catch(err){status.textContent+=' A prévia não foi carregada pelo navegador.'}
  }catch(err){
-  status.textContent='Erro: '+(err&&err.message?err.message:String(err))+'. Se persistir, envie os logs do Render.';
+  status.textContent='Não foi possível concluir: '+(err&&err.message?err.message:String(err))+'. Você pode tentar novamente ou selecionar outra voz.';
  }finally{btn.disabled=false}
 }
 
