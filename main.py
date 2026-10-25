@@ -27,21 +27,45 @@ def service_worker():
 def health():
     return {"ok": True}
 
+def roteiro_basico(topic: str, seconds: int, style: str):
+    """Modelo editorial offline, sem alegações factuais não verificadas."""
+    topic = " ".join(topic.split())[:180]
+    if not topic:
+        raise HTTPException(400, "Informe o tema do vídeo.")
+    if seconds not in (30, 60, 90):
+        raise HTTPException(400, "Escolha 30, 60 ou 90 segundos.")
+    styles = {
+        "Sombrio e investigativo": ("Um mistério merece investigação, não suposições.", "com atmosfera de suspense"),
+        "Jornalístico e objetivo": ("O que sabemos, e o que ainda precisa ser confirmado?", "com linguagem objetiva"),
+        "Documentário cinematográfico": ("Toda história tem perguntas que merecem respostas.", "com ritmo documental"),
+    }
+    hook, tone = styles.get(style, styles["Sombrio e investigativo"])
+    sections = [
+        f"{hook} Hoje, o Arquivo Zero examina o tema: {topic}.",
+        "Para compreender este assunto, precisamos separar os acontecimentos documentados das interpretações e das hipóteses.",
+        "O primeiro passo é estabelecer a cronologia, identificar as fontes originais e verificar o contexto em que cada informação surgiu.",
+        "Também é importante comparar relatos independentes e observar o que permanece incerto ou controverso.",
+        "Imagens, depoimentos e manchetes podem ser impactantes, mas não substituem evidências verificáveis.",
+        "Antes de tirar conclusões, confira datas, documentos e informações em fontes confiáveis.",
+        f"Este foi o Arquivo Zero. O tema de hoje foi {topic}. Quais perguntas você investigaria primeiro?"
+    ]
+    count = {30: 3, 60: 5, 90: 7}[seconds]
+    selected = sections if count == 7 else [sections[0], *sections[1:-1][:count-2], sections[-1]]
+    script = " ".join(selected)
+    return {
+        "title": topic[:100],
+        "script": script,
+        "hook": hook,
+        "caption": f"Arquivo Zero | {topic}. Conteúdo editorial {tone}. Verifique os fatos antes de publicar. #ArquivoZero #Documentario",
+        "mode": "modelo_gratuito",
+        "notice": "Roteiro estrutural gerado sem IA e sem pesquisa. Acrescente fatos e fontes verificadas. A duração é aproximada."
+    }
+
 @app.post("/api/roteiro")
 async def roteiro(topic: str = Form(...), seconds: int = Form(60), style: str = Form("Sombrio e investigativo")):
-    key = os.getenv("OPENAI_API_KEY")
-    if not key:
-        raise HTTPException(503, "Configure OPENAI_API_KEY no servidor para gerar roteiros com IA.")
-    from openai import AsyncOpenAI
-    try:
-        client = AsyncOpenAI(api_key=key)
-        response = await client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            messages=[{"role":"user","content":f"Crie roteiro documental em português brasileiro com cerca de {seconds} segundos. Tema: {topic}. Estilo: {style}. Responda em JSON com title, script, caption e hook. Não invente fatos, fontes ou citações; sinalize incertezas."}],
-            response_format={"type":"json_object"})
-        return json.loads(response.choices[0].message.content)
-    except Exception:
-        raise HTTPException(502, "Falha na API de IA. Verifique a chave, saldo e modelo.")
+    if len(topic) > 180:
+        raise HTTPException(400, "O tema deve ter até 180 caracteres.")
+    return roteiro_basico(topic, seconds, style)
 
 def run(args):
     p = subprocess.run(args, capture_output=True, text=True, timeout=900)
