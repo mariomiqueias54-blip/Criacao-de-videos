@@ -112,7 +112,7 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
             run(["ffmpeg","-y","-loop","1","-framerate","25","-i",str(slide),"-t",str(max(.5,seconds/len(chunks))),"-vf",f"scale={width}:{height},format=yuv420p","-c:v","libx264","-preset","ultrafast","-r","25",str(clip)])
             parts.append(clip)
         concat=temp/"list.txt"
-        concat.write_text("".join("file '"+str(p)+"'\\n" for p in parts))
+        concat.write_text("".join("file '"+str(p)+"'\n" for p in parts))
         video=OUT/f"{job}.mp4"
         run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(concat),"-i",str(audio),"-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p","-c:a","aac","-shortest","-movflags","+faststart",str(video)])
         return {"video":f"/download/{job}.mp4","audio":f"/download/{job}.mp3","duration":round(seconds,1),"resolution":f"{width} x {height}"}
