@@ -161,7 +161,7 @@ async def voice_preview(voice: str = Form("pt-BR-AntonioNeural"), voice_rate: st
         raise HTTPException(502, "Não foi possível gerar a prévia da voz.") from exc
 
 @app.post("/api/render")
-async def render(title: str=Form(...), script: str=Form(...), format: str=Form("vertical"), voice: str=Form("pt-BR-AntonioNeural"), images: list[UploadFile]=File(default=[]), visual_style: str=Form("documentary"), voice_rate: str=Form("+0%"), voice_pitch: str=Form("+0Hz")):
+async def render(title: str=Form(...), script: str=Form(...), format: str=Form("vertical"), voice: str=Form("pt-BR-AntonioNeural"), images: list[UploadFile]=File(default=[]), visual_style: str=Form("documentary"), voice_rate: str=Form("+0%"), voice_pitch: str=Form("+0Hz"), captions: str=Form("on")):
     if not title.strip() or not script.strip() or len(script)>5000:
         raise HTTPException(400, "Informe título e narração de até 5000 caracteres.")
     if voice not in ("pt-BR-AntonioNeural","pt-BR-FranciscaNeural","pt-BR-BrendaNeural","pt-BR-DonatoNeural","pt-BR-GiovannaNeural","pt-BR-HumbertoNeural","pt-BR-JulioNeural","pt-BR-LeilaNeural","pt-BR-ManuelaNeural","pt-BR-NicolauNeural","pt-BR-ThalitaNeural","pt-BR-YaraNeural"):
@@ -172,6 +172,8 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
         raise HTTPException(400,"Estilo visual inválido")
     if voice_rate not in ("-15%","-8%","+0%","+8%","+15%") or voice_pitch not in ("-10Hz","-5Hz","+0Hz","+5Hz"):
         raise HTTPException(400,"Ajuste de voz inválido")
+    if captions not in ("on","off"):
+        raise HTTPException(400,"Configuração de legendas inválida")
     width,height={"vertical":(1080,1920),"horizontal":(1920,1080),"square":(1080,1080),"portrait":(1080,1350)}[format]
     # Desenha as telas em meia resolucao para poupar RAM; exporta em Full HD.
     slide_width,slide_height=width//2,height//2
@@ -200,7 +202,7 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
         slides=[]
         for i,chunk in enumerate(chunks):
             slide=temp/f"slide{i}.jpg"
-            make_slide(slide,title,chunk,pics[i%len(pics)] if pics else None,slide_width,slide_height,visual_style)
+            make_slide(slide,title,chunk if captions=="on" else "",pics[i%len(pics)] if pics else None,slide_width,slide_height,visual_style)
             slides.append(slide)
         concat=temp/"slides.txt"
         duration=max(0.5,seconds/len(slides))
