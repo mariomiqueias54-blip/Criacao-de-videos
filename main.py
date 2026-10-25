@@ -24,6 +24,10 @@ def manifest():
 def service_worker():
     return FileResponse(BASE / "sw.js", media_type="application/javascript")
 
+@app.get("/api/capabilities")
+def capabilities():
+    return {"ai_enabled": bool(os.getenv("OPENAI_API_KEY", "").strip())}
+
 @app.get("/health")
 def health():
     return {"ok": True}
