@@ -28,7 +28,7 @@ def service_worker():
 
 @app.get("/api/capabilities")
 def capabilities():
-    return {"ai_enabled": bool(os.getenv("OPENAI_API_KEY", "").strip())}
+    return {"ai_enabled": bool(os.getenv("OPENAI_API_KEY", "").strip()), "premium_voice_enabled": bool(os.getenv("OPENAI_API_KEY", "").strip())}
 
 @app.get("/health")
 def health():
@@ -149,14 +149,45 @@ def make_slide(path, title, text, image_path, width, height, visual_style="docum
         d.text((int(width*.06),y),line,font=small,fill=accent if visual_style=="minimal" else "white");y+=int(width*.042)
     bg.save(path)
 
+PREMIUM_VOICES = ("openai:onyx","openai:echo","openai:alloy","openai:nova","openai:fable","openai:shimmer")
+
+async def synthesize_voice(text, voice, rate, pitch, destination):
+    if voice in PREMIUM_VOICES:
+        key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not key:
+            raise HTTPException(400, "Voz premium exige OPENAI_API_KEY no Render.")
+        try:
+            client = AsyncOpenAI(api_key=key, timeout=90.0)
+            result = await client.audio.speech.create(
+                model=os.getenv("OPENAI_TTS_MODEL", "tts-1-hd"),
+                voice=voice.split(":", 1)[1],
+                input=text,
+                response_format="mp3",
+                speed={"-15%":0.85,"-8%":0.92,"+0%":1.0,"+8%":1.08,"+15%":1.15}[rate])
+            destination.write_bytes(result.content)
+        except Exception as exc:
+            logging.exception("Falha no provedor premium de voz")
+            raise HTTPException(502, "Falha na voz premium. Verifique créditos e permissões da API.") from exc
+        return
+    for attempt in range(2):
+        try:
+            await edge_tts.Communicate(text,voice,rate=rate,pitch=pitch).save(str(destination))
+            if destination.is_file() and destination.stat().st_size > 1024:
+                return
+        except Exception:
+            logging.exception("Falha no provedor gratuito de voz (tentativa %s)",attempt+1)
+        if attempt == 0:
+            await asyncio.sleep(1)
+    raise HTTPException(503, "O serviço gratuito de voz não enviou áudio. Tente outra voz ou use a voz premium.")
+
 @app.post("/api/voice-preview")
 async def voice_preview(voice: str = Form("pt-BR-AntonioNeural"), voice_rate: str = Form("+0%"), voice_pitch: str = Form("+0Hz")):
     allowed = ("pt-BR-AntonioNeural","pt-BR-FranciscaNeural","pt-BR-BrendaNeural","pt-BR-DonatoNeural","pt-BR-GiovannaNeural","pt-BR-HumbertoNeural","pt-BR-JulioNeural","pt-BR-LeilaNeural","pt-BR-ManuelaNeural","pt-BR-NicolauNeural","pt-BR-ThalitaNeural","pt-BR-YaraNeural")
-    if voice not in allowed or voice_rate not in ("-15%","-8%","+0%","+8%","+15%") or voice_pitch not in ("-10Hz","-5Hz","+0Hz","+5Hz"):
+    if voice not in allowed + PREMIUM_VOICES or voice_rate not in ("-15%","-8%","+0%","+8%","+15%") or voice_pitch not in ("-10Hz","-5Hz","+0Hz","+5Hz"):
         raise HTTPException(400, "Configuração de voz inválida.")
     filename = uuid.uuid4().hex + ".mp3"
     try:
-        await edge_tts.Communicate("Bem-vindo ao Arquivo Zero Studio. Esta é uma demonstração da minha voz para seus próximos vídeos.",voice,rate=voice_rate,pitch=voice_pitch).save(str(OUT / filename))
+        await synthesize_voice("Bem-vindo ao Arquivo Zero Studio. Esta é uma demonstração da minha voz para seus próximos vídeos.",voice,voice_rate,voice_pitch,OUT / filename)
         return {"audio":"/download/"+filename}
     except Exception as exc:
         logging.exception("Falha na prévia da voz")
@@ -166,7 +197,7 @@ async def voice_preview(voice: str = Form("pt-BR-AntonioNeural"), voice_rate: st
 async def render(title: str=Form(...), script: str=Form(...), format: str=Form("vertical"), voice: str=Form("pt-BR-AntonioNeural"), images: list[UploadFile]=File(default=[]), visual_style: str=Form("documentary"), voice_rate: str=Form("+0%"), voice_pitch: str=Form("+0Hz"), captions: str=Form("on")):
     if not title.strip() or not script.strip() or len(script)>5000:
         raise HTTPException(400, "Informe título e narração de até 5000 caracteres.")
-    if voice not in ("pt-BR-AntonioNeural","pt-BR-FranciscaNeural","pt-BR-BrendaNeural","pt-BR-DonatoNeural","pt-BR-GiovannaNeural","pt-BR-HumbertoNeural","pt-BR-JulioNeural","pt-BR-LeilaNeural","pt-BR-ManuelaNeural","pt-BR-NicolauNeural","pt-BR-ThalitaNeural","pt-BR-YaraNeural"):
+    if voice not in PREMIUM_VOICES + ("pt-BR-AntonioNeural","pt-BR-FranciscaNeural","pt-BR-BrendaNeural","pt-BR-DonatoNeural","pt-BR-GiovannaNeural","pt-BR-HumbertoNeural","pt-BR-JulioNeural","pt-BR-LeilaNeural","pt-BR-ManuelaNeural","pt-BR-NicolauNeural","pt-BR-ThalitaNeural","pt-BR-YaraNeural"):
         raise HTTPException(400,"Voz inválida")
     if format not in ("vertical","horizontal","square","portrait") or len(images)>15:
         raise HTTPException(400,"Formato ou quantidade de imagens inválidos")
@@ -195,23 +226,7 @@ async def render(title: str=Form(...), script: str=Form(...), format: str=Form("
                 path=temp/f"photo{i}.jpg"; im.save(path);pics.append(path)
             except Exception:raise HTTPException(400,"Imagem inválida")
         audio=OUT/f"{job}.mp3"
-        # O provedor de TTS pode recusar vozes ou retornar áudio vazio.
-        # Faz uma nova tentativa antes de retornar uma mensagem compreensível.
-        audio_ready = False
-        for attempt in range(2):
-            try:
-                await edge_tts.Communicate(script,voice,rate=voice_rate,pitch=voice_pitch).save(str(audio))
-                if audio.is_file() and audio.stat().st_size > 1024:
-                    audio_ready = True
-                    break
-            except NoAudioReceived:
-                logging.warning("TTS sem áudio para voz %s, tentativa %s", voice, attempt + 1)
-            except Exception:
-                logging.exception("Erro ao gerar narração, tentativa %s", attempt + 1)
-            if attempt == 0:
-                await asyncio.sleep(1)
-        if not audio_ready:
-            raise HTTPException(503, "O serviço de voz não enviou áudio. Experimente Antônio ou Francisca, no tom original, e tente novamente.")
+        await synthesize_voice(script,voice,voice_rate,voice_pitch,audio)
         seconds=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(audio)]).strip())
         words=script.split()
         chunks=[" ".join(words[i:i+28]) for i in range(0,len(words),28)] or [script]
