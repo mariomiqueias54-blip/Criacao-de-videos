@@ -87,7 +87,7 @@ def make_slide(path, title, text, image_path, width, height):
         out=[]; current=""
         for word in s.split():
             test=(current+" "+word).strip()
-            if current and d.textbbox((0,0,test),font=f)[2]>max_width:
+            if current and d.textbbox((0,0),test,font=f)[2]>max_width:
                 out.append(current);current=word
             else:current=test
         return out+[current]
